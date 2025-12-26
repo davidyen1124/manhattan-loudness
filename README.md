@@ -29,7 +29,7 @@ Then open the URL Vite prints (usually `http://localhost:5173`).
 
 - `src/App.tsx` renders everything on a single `<canvas>` (2D context).
 - “Volume” is `1 - (|dx| + |dy|) / radius`, clamped to `[0, 1]`.
-- Audio is Web Audio API: a looping “radio-ish” buffer goes through a `GainNode` that tracks your distance.
+- Audio is Web Audio API: layered looping buffers (pad, bass, drums, hiss, crackle) run through filters into a master `GainNode` that tracks your distance.
 - The maze walls are randomly stamped rectangles, plus a safe-ish clearing around spawn + source.
 
 ## Controls & Tips

@@ -23,8 +23,8 @@ type GameState = {
 
 type AudioState = {
   ctx: AudioContext
-  gain: GainNode
-  source: AudioBufferSourceNode
+  masterGain: GainNode
+  sources: AudioBufferSourceNode[]
 }
 
 const CELL_SIZE = 32
@@ -32,6 +32,8 @@ const MAX_SPEED = 6
 const ACCEL = 28
 const DRAG = 12
 const VOLUME_RADIUS = 12
+const LOFI_SECONDS = 8
+const BPM = 90
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
@@ -41,25 +43,156 @@ function randInt(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min
 }
 
-function createRadioBuffer(ctx: AudioContext) {
-  const seconds = 4
+function smoothstep(edge0: number, edge1: number, x: number) {
+  const t = clamp((x - edge0) / (edge1 - edge0), 0, 1)
+  return t * t * (3 - 2 * t)
+}
+
+const CHORDS = [
+  { root: 220, quality: 'minor' },
+  { root: 174.61, quality: 'major' },
+  { root: 261.63, quality: 'major' },
+  { root: 196, quality: 'major' },
+] as const
+
+function chordFrequencies(root: number, quality: 'major' | 'minor') {
+  const third = quality === 'minor' ? 6 / 5 : 5 / 4
+  return [root, root * third, root * 1.5, root * 2]
+}
+
+function createLofiPadBuffer(ctx: AudioContext) {
+  const seconds = LOFI_SECONDS
+  const length = ctx.sampleRate * seconds
+  const buffer = ctx.createBuffer(1, length, ctx.sampleRate)
+  const data = buffer.getChannelData(0)
+  const chordDuration = seconds / CHORDS.length
+
+  for (let i = 0; i < length; i += 1) {
+    const t = i / ctx.sampleRate
+    const chordIndex = Math.floor(t / chordDuration) % CHORDS.length
+    const nextIndex = (chordIndex + 1) % CHORDS.length
+    const localT = t % chordDuration
+    const fade = smoothstep(chordDuration - 0.4, chordDuration, localT)
+
+    const renderChord = (index: number) => {
+      const chord = CHORDS[index]
+      const freqs = chordFrequencies(chord.root, chord.quality)
+      let sum = 0
+      for (let j = 0; j < freqs.length; j += 1) {
+        const drift =
+          1 +
+          0.003 * Math.sin(2 * Math.PI * (0.25 + j * 0.07) * t) +
+          0.0015 * Math.sin(2 * Math.PI * (0.62 + j * 0.05) * t)
+        sum += Math.sin(2 * Math.PI * freqs[j] * drift * t)
+      }
+      return sum / freqs.length
+    }
+
+    const tone = renderChord(chordIndex) * (1 - fade) + renderChord(nextIndex) * fade
+    const wobble = 0.55 + 0.2 * Math.sin(2 * Math.PI * 0.08 * t)
+    data[i] = Math.tanh(tone * 0.7) * wobble * 0.28
+  }
+
+  return buffer
+}
+
+function createBassBuffer(ctx: AudioContext) {
+  const seconds = LOFI_SECONDS
+  const length = ctx.sampleRate * seconds
+  const buffer = ctx.createBuffer(1, length, ctx.sampleRate)
+  const data = buffer.getChannelData(0)
+  const chordDuration = seconds / CHORDS.length
+  const beat = 60 / BPM
+
+  for (let i = 0; i < length; i += 1) {
+    const t = i / ctx.sampleRate
+    const beatIndex = Math.floor(t / beat)
+    const beatInBar = beatIndex % 4
+    const noteTime = t - beatIndex * beat
+    const chordIndex = Math.floor(t / chordDuration) % CHORDS.length
+    const root = CHORDS[chordIndex].root / 2
+    let sample = 0
+
+    if ((beatInBar === 0 || beatInBar === 2) && noteTime < 0.45) {
+      const wobble = 1 + 0.002 * Math.sin(2 * Math.PI * 0.2 * t)
+      const env = Math.exp(-noteTime * 5)
+      sample = Math.sin(2 * Math.PI * root * wobble * t) * env * 0.6
+    }
+
+    data[i] = sample * 0.5
+  }
+
+  return buffer
+}
+
+function createDrumBuffer(ctx: AudioContext) {
+  const seconds = LOFI_SECONDS
+  const length = ctx.sampleRate * seconds
+  const buffer = ctx.createBuffer(1, length, ctx.sampleRate)
+  const data = buffer.getChannelData(0)
+  const beat = 60 / BPM
+  const hatBeat = beat / 2
+
+  for (let i = 0; i < length; i += 1) {
+    const t = i / ctx.sampleRate
+    const beatIndex = Math.floor(t / beat)
+    const beatInBar = beatIndex % 4
+    const noteTime = t - beatIndex * beat
+    const hatIndex = Math.floor(t / hatBeat)
+    const hatTime = t - hatIndex * hatBeat
+    const noise = Math.random() * 2 - 1
+    let sample = 0
+
+    if ((beatInBar === 0 || beatInBar === 2) && noteTime < 0.18) {
+      const env = Math.exp(-noteTime * 16)
+      const freq = 120 - noteTime * 80
+      sample += Math.sin(2 * Math.PI * freq * noteTime) * env * 0.9
+    }
+
+    if ((beatInBar === 1 || beatInBar === 3) && noteTime < 0.2) {
+      const env = Math.exp(-noteTime * 20)
+      sample += noise * env * 0.5
+    }
+
+    if (hatTime < 0.06) {
+      const env = Math.exp(-hatTime * 40)
+      sample += noise * env * 0.25
+    }
+
+    data[i] = sample * 0.5
+  }
+
+  return buffer
+}
+
+function createHissBuffer(ctx: AudioContext) {
+  const seconds = LOFI_SECONDS
   const length = ctx.sampleRate * seconds
   const buffer = ctx.createBuffer(1, length, ctx.sampleRate)
   const data = buffer.getChannelData(0)
 
   for (let i = 0; i < length; i += 1) {
-    const t = i / ctx.sampleRate
-    const isFirst = t < seconds / 2
-    const chord = isFirst
-      ? [261.63, 329.63, 392.0]
-      : [196.0, 246.94, 392.0]
-    const tone =
-      Math.sin(2 * Math.PI * chord[0] * t) +
-      Math.sin(2 * Math.PI * chord[1] * t) +
-      Math.sin(2 * Math.PI * chord[2] * t)
-    const wobble = 0.6 + 0.4 * Math.sin(2 * Math.PI * 0.35 * t)
-    const noise = (Math.random() * 2 - 1) * 0.02
-    data[i] = (tone / 3) * 0.35 * wobble + noise
+    const noise = Math.random() * 2 - 1
+    data[i] = noise * 0.008
+  }
+
+  return buffer
+}
+
+function createCrackleBuffer(ctx: AudioContext) {
+  const seconds = LOFI_SECONDS
+  const length = ctx.sampleRate * seconds
+  const buffer = ctx.createBuffer(1, length, ctx.sampleRate)
+  const data = buffer.getChannelData(0)
+  let pop = 0
+
+  for (let i = 0; i < length; i += 1) {
+    if (Math.random() < 0.0007) {
+      pop = (Math.random() * 2 - 1) * 0.5
+    }
+    pop *= 0.96
+    const base = (Math.random() * 2 - 1) * 0.006
+    data[i] = base + pop * 0.2
   }
 
   return buffer
@@ -192,14 +325,54 @@ function App() {
     const startAudio = async () => {
       if (!audioRef.current) {
         const audioCtx = new AudioContext()
-        const gain = audioCtx.createGain()
-        gain.gain.value = 0
-        const source = audioCtx.createBufferSource()
-        source.buffer = createRadioBuffer(audioCtx)
-        source.loop = true
-        source.connect(gain).connect(audioCtx.destination)
-        source.start()
-        audioRef.current = { ctx: audioCtx, gain, source }
+        const masterGain = audioCtx.createGain()
+        masterGain.gain.value = 0
+        masterGain.connect(audioCtx.destination)
+
+        const musicFilter = audioCtx.createBiquadFilter()
+        musicFilter.type = 'lowpass'
+        musicFilter.frequency.value = 3600
+        musicFilter.Q.value = 0.7
+        musicFilter.connect(masterGain)
+
+        const musicGain = audioCtx.createGain()
+        musicGain.gain.value = 0.75
+        musicGain.connect(musicFilter)
+
+        const noiseFilter = audioCtx.createBiquadFilter()
+        noiseFilter.type = 'highpass'
+        noiseFilter.frequency.value = 700
+        noiseFilter.Q.value = 0.8
+        noiseFilter.connect(masterGain)
+
+        const pad = audioCtx.createBufferSource()
+        pad.buffer = createLofiPadBuffer(audioCtx)
+        pad.loop = true
+        pad.connect(musicGain)
+
+        const bass = audioCtx.createBufferSource()
+        bass.buffer = createBassBuffer(audioCtx)
+        bass.loop = true
+        bass.connect(musicGain)
+
+        const drums = audioCtx.createBufferSource()
+        drums.buffer = createDrumBuffer(audioCtx)
+        drums.loop = true
+        drums.connect(musicGain)
+
+        const hiss = audioCtx.createBufferSource()
+        hiss.buffer = createHissBuffer(audioCtx)
+        hiss.loop = true
+        hiss.connect(noiseFilter)
+
+        const crackle = audioCtx.createBufferSource()
+        crackle.buffer = createCrackleBuffer(audioCtx)
+        crackle.loop = true
+        crackle.connect(noiseFilter)
+
+        const sources = [pad, bass, drums, hiss, crackle]
+        sources.forEach((source) => source.start())
+        audioRef.current = { ctx: audioCtx, masterGain, sources }
       }
 
       if (audioRef.current.ctx.state !== 'running') {
@@ -288,7 +461,7 @@ function App() {
         state.volume = clamp(1 - dist / state.radius, 0, 1)
 
         if (audioRef.current && audioRef.current.ctx.state === 'running') {
-          audioRef.current.gain.gain.setTargetAtTime(
+          audioRef.current.masterGain.gain.setTargetAtTime(
             state.volume,
             audioRef.current.ctx.currentTime,
             0.05
@@ -352,7 +525,7 @@ function App() {
           ctx.fillStyle = '#ffffff'
           ctx.font = '16px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas'
           ctx.textAlign = 'center'
-          ctx.fillText('Click to start the radio', state.viewWidth / 2, 20)
+          ctx.fillText('Click to start the lofi radio', state.viewWidth / 2, 20)
         }
       }
 
@@ -371,7 +544,7 @@ function App() {
       canvas.removeEventListener('pointerdown', handlePointerDown)
 
       if (audioRef.current) {
-        audioRef.current.source.stop()
+        audioRef.current.sources.forEach((source) => source.stop())
         void audioRef.current.ctx.close()
       }
     }
