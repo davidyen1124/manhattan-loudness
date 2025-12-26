@@ -1,73 +1,43 @@
-# React + TypeScript + Vite
+# Manhattan Loudness
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+![Manhattan Loudness demo](docs/demo.gif)
 
-Currently, two official plugins are available:
+A live demo is (or soon will be) served fresh from the sleigh at: `https://davidyen1124.github.io/manhattan-loudness/`
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+A tiny browser game where you chase a suspiciously cheerful “radio” through a procedurally-generated maze.
+The closer you get, the louder it gets… using **Manhattan distance** (because in Manhattan, even your math refuses to move diagonally).
 
-## React Compiler
+If you’ve ever thought “What if an audio mixer was also a dungeon crawler?”, congratulations: you have the exact kind of problem this repo solves.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## How to Play
 
-## Expanding the ESLint configuration
+- Click / tap the canvas to start audio (browsers require a user gesture; they’re fun at parties like that).
+- Move with `WASD` or the arrow keys.
+- Blue dot = you. Gold dot = the radio source.
+- The right-side meter is your loudness bar. Red means “you found it”, green means “it’s somewhere… in Manhattan… probably”.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Run It Locally
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Then open the URL Vite prints (usually `http://localhost:5173`).
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## What’s Actually Happening (Under The Tinsel)
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+- `src/App.tsx` renders everything on a single `<canvas>` (2D context).
+- “Volume” is `1 - (|dx| + |dy|) / radius`, clamped to `[0, 1]`.
+- Audio is Web Audio API: a looping “radio-ish” buffer goes through a `GainNode` that tracks your distance.
+- The maze walls are randomly stamped rectangles, plus a safe-ish clearing around spawn + source.
+
+## Controls & Tips
+
+- If you hear nothing: click the canvas once. Browsers won’t autoplay sound, no matter how politely you ask.
+- The meter is a lie in the best way: it’s honest, but it’s also judging you.
+
+## Notes
+
+- Not affiliated with New York City, its noise complaints, or any landlord who “didn’t hear anything.”
+- PRs welcome, especially if they add pigeons, taxis, or a boss fight against a leaf blower.
